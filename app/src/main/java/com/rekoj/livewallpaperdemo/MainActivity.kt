@@ -24,7 +24,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.main_activity)
         permissionCheck
         findViewById<Button?>(R.id.choose_video_file).apply {
-            setOnClickListener { chooseVideo() }
+            setOnClickListener {
+                VideoLiveWallpaperService.setToWallPaper(this@MainActivity)
+            }
         }
 
         findViewById<Button?>(R.id.add_video_file_path).apply {

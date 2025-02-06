@@ -1,77 +1,92 @@
 package com.rekoj.livewallpaperdemo.service
 
+import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.app.WallpaperManager
-import android.content.*
-import android.media.MediaPlayer
+import android.content.BroadcastReceiver
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.opengl.GLSurfaceView
+import android.opengl.GLSurfaceView.RENDERMODE_CONTINUOUSLY
 import android.service.wallpaper.WallpaperService
+import android.util.Log
 import android.view.SurfaceHolder
-import java.io.File
+import android.widget.Toast
+import com.rekoj.livewallpaperdemo.opengl.MyBaseRenderer
 import java.io.IOException
 
 class VideoLiveWallpaperService : WallpaperService() {
     internal inner class VideoEngine : Engine() {
-        private var mediaPlayer: MediaPlayer? = null
         private var broadcastReceiver: BroadcastReceiver? = null
-        private var videoFilePath: String? = null
+        private var glSurfaceView: WallpaperGLSurfaceView? = null
+        private var rendererSet = false
 
+        @SuppressLint("ClickableViewAccessibility")
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
-            videoFilePath =
-                this@VideoLiveWallpaperService.openFileInput("video_live_wallpaper_file_path")
-                    .bufferedReader().readText()
-            val intentFilter = IntentFilter(VIDEO_PARAMS_CONTROL_ACTION)
-            registerReceiver(object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    val action = intent.getBooleanExtra(KEY_ACTION, false)
-                    if (action) {
-                        mediaPlayer!!.setVolume(0f, 0f)
-                    } else {
-                        mediaPlayer!!.setVolume(1.0f, 1.0f)
-                    }
-                }
-            }.also { broadcastReceiver = it }, intentFilter)
+
+            val activityManager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            val configurationInfo = activityManager.deviceConfigurationInfo
+            val supportsEs3 = configurationInfo.reqGlEsVersion >= 0x30000
+
+            if (supportsEs3) {
+                val myRenderer = MyBaseRenderer(this@VideoLiveWallpaperService)
+                glSurfaceView = WallpaperGLSurfaceView(this@VideoLiveWallpaperService)
+                glSurfaceView?.setEGLContextClientVersion(3)
+                glSurfaceView?.setRenderer(myRenderer)
+                rendererSet = true
+            } else {
+                Toast.makeText(
+                    this@VideoLiveWallpaperService, "This device does not support OpenGL ES 3.0.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+        }
+
+        inner class WallpaperGLSurfaceView(context: Context) : GLSurfaceView(context) {
+            init {
+                setEGLContextClientVersion(3)
+            }
+
+            override fun getHolder(): SurfaceHolder {
+                return super.getHolder()
+            }
+
+            fun onWallpaperDestroy() {
+                super.onDetachedFromWindow()
+            }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
-            mediaPlayer = MediaPlayer().apply {
-                setSurface(holder.surface)
-                setDataSource(videoFilePath)
-                isLooping = true
-                setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
-                prepare()
-                start()
-            }
-            try {
-                val file = File("$filesDir/unmute")
-                if (file.exists()) mediaPlayer!!.setVolume(1.0f, 1.0f) else mediaPlayer!!.setVolume(
-                    0f,
-                    0f
-                )
-            } catch (e: IOException) {
-                e.printStackTrace()
+            Log.e("DatPV", rendererSet.toString())
+            if (rendererSet) {
+                glSurfaceView?.onResume()
             }
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
-            if (visible) {
-                mediaPlayer!!.start()
-            } else {
-                mediaPlayer!!.pause()
+            if (rendererSet) {
+                if (visible) {
+                    glSurfaceView?.onResume()
+                } else {
+                    glSurfaceView?.onPause()
+                }
             }
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             super.onSurfaceDestroyed(holder)
-            if (mediaPlayer!!.isPlaying) mediaPlayer!!.stop()
-            mediaPlayer?.release()
-            mediaPlayer = null
+            if (rendererSet) {
+                glSurfaceView?.onPause()
+            }
         }
 
         override fun onDestroy() {
             super.onDestroy()
-            mediaPlayer?.release()
-            mediaPlayer = null
+            glSurfaceView?.onWallpaperDestroy()
             unregisterReceiver(broadcastReceiver)
         }
     }
@@ -85,6 +100,7 @@ class VideoLiveWallpaperService : WallpaperService() {
         private const val KEY_ACTION = "music"
         private const val ACTION_MUSIC_UNMUTE = false
         private const val ACTION_MUSIC_MUTE = true
+
         fun muteMusic(context: Context) {
             Intent(VIDEO_PARAMS_CONTROL_ACTION).apply {
                 putExtra(KEY_ACTION, ACTION_MUSIC_MUTE)
